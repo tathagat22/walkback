@@ -1,0 +1,19 @@
+[package]
+name = "undo-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The reversible side-effect engine behind `undo` — Ctrl-Z for AI agents."
+
+[lib]
+name = "undo_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "undo"
+path = "src/bin/undo.rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true

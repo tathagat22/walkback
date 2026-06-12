@@ -1,0 +1,19 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Node / TypeScript
+node_modules
+dist
+*.tsbuildinfo
+
+# NAPI build artifacts
+*.node
+crates/undo-napi/index.js
+crates/undo-napi/index.d.ts
+
+# undo's own working dir (never commit captured snapshots)
+.undo
+
+# OS
+.DS_Store

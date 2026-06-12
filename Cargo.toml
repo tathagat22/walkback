@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/undo-core",
+    # "crates/undo-napi",  # added after core is green
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/tathagat22/agent-undo"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
