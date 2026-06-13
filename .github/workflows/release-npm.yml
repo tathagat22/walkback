@@ -1,0 +1,91 @@
+name: Release npm
+
+# Builds the native NAPI engine for every platform and publishes the npm
+# packages (so `npm i @agent-undo/core` needs no Rust toolchain). Mirrors the
+# canonical napi-rs release pattern: build per-target -> collect artifacts ->
+# prepublish platform packages -> publish.
+#
+# Requires repo secret NPM_TOKEN and the `@agent-undo` npm org (see RELEASING.md).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: engine (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-13, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    defaults:
+      run:
+        working-directory: crates/undo-napi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Build native addon
+        run: npx napi build --platform --release --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: crates/undo-napi/*.node
+          if-no-files-found: error
+
+  publish:
+    name: publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install deps (root + napi workspace)
+        run: npm install
+
+      - name: Download all built addons
+        uses: actions/download-artifact@v4
+        with:
+          path: crates/undo-napi/artifacts
+
+      - name: Assemble per-platform packages
+        working-directory: crates/undo-napi
+        run: |
+          npx napi create-npm-dir -t .
+          npx napi artifacts --dir artifacts
+          ls -R npm
+
+      # Publishes @agent-undo/engine-<platform> packages and updates the main
+      # @agent-undo/engine package's optionalDependencies.
+      - name: Publish engine packages
+        working-directory: crates/undo-napi
+        run: npx napi prepublish -t npm --skip-gh-release
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Publish the MCP server package (@agent-undo/core), which depends on the engine.
+      - name: Build & publish @agent-undo/core
+        run: |
+          npm run build
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

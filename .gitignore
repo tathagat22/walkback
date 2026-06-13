@@ -17,3 +17,7 @@ crates/undo-napi/index.d.ts
 
 # OS
 .DS_Store
+
+# napi release staging (regenerated in CI)
+crates/undo-napi/npm/
+crates/undo-napi/artifacts/

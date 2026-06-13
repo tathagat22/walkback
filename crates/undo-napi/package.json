@@ -6,7 +6,13 @@
   "types": "index.d.ts",
   "license": "MIT",
   "napi": {
-    "name": "undo-engine"
+    "name": "undo-engine",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "aarch64-apple-darwin"
+      ]
+    }
   },
   "files": [
     "index.js",
