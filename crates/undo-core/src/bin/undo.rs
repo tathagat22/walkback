@@ -32,6 +32,7 @@ fn main() {
         "status" | "st" => cmd_status(),
         "log" => cmd_log(),
         "rollback" | "undo" => cmd_rollback(rest),
+        "revert" => cmd_revert(rest),
         "redo" => cmd_redo(),
         "run" => cmd_run(rest),
         "watch" => cmd_watch(rest),
@@ -194,6 +195,25 @@ fn cmd_rollback(rest: &[String]) -> io::Result<()> {
     }
     if !report.failed.is_empty() {
         exit(1);
+    }
+    Ok(())
+}
+
+fn cmd_revert(rest: &[String]) -> io::Result<()> {
+    if rest.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: undo revert <path>...",
+        ));
+    }
+    let u = open()?;
+    let cwd = env::current_dir()?;
+    for p in rest {
+        let abs = cwd.join(p);
+        match u.revert(&abs)? {
+            Some(msg) => println!("\x1b[32m✓\x1b[0m {msg}"),
+            None => println!("\x1b[2m·\x1b[0m {p} (not tracked — nothing to revert)"),
+        }
     }
     Ok(())
 }
@@ -537,6 +557,7 @@ fn print_help() {
          \x20 status                   what's changed since the last checkpoint\n\
          \x20 log                      the full history\n\
          \x20 rollback [checkpoint]    rewind everything since a checkpoint\n\
+         \x20 revert <path>            selectively undo just one file\n\
          \x20 redo                     undo the last rollback\n\
          \n\
          AUTO-CAPTURE (works with any AI agent)\n\

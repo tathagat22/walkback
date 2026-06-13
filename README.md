@@ -238,17 +238,37 @@ undo_email_release                                                 # ...or actua
 
 In short: undo gives the email a **hold window** in which it genuinely never happened. It does **not** pretend to reach into other people's inboxes. `undo` holds no Google credentials itself — it uses a `GMAIL_ACCESS_TOKEN` you supply.
 
+## Cloud, databases, and anything scriptable
+
+undo doesn't hardcode AWS, Postgres, or Terraform. Instead, when the agent does something to an external system, it records the **command that reverses it** — and undo runs that on compensate (dry-run gated, same as network undo):
+
+```
+undo_record_reversal  description="created S3 bucket assets-prod"  command="aws s3 rb s3://assets-prod --force"
+undo_record_reversal  description="ran migration 042"             command="psql $DB -f rollback_042.sql"
+
+undo_compensate                  # preview every teardown
+undo_compensate execute=true     # run them, most-recent-first
+```
+
+This works with **any** cloud, database, or CLI — not a hardcoded few. Honest caveat for databases: undo runs the inverse you record, so for `UPDATE`/`DELETE` you must capture the prior values to build that inverse. undo executes; it doesn't guess.
+
+## Selective undo
+
+Rollback is all-or-nothing; sometimes you want to keep most of what the agent did and reverse *one* thing:
+
+```bash
+undo revert src/config.ts        # restore just this file; leave everything else
+```
+
 ## What's reversible today, and what's next
 
-**Today:** filesystem create / modify / delete / directories / symlinks / permissions, fully reversed with redo. **Network mutations auto-reversed** via recorded compensators (dry-run gated). **Email hold-and-release** (true unsend within the hold window). Shell commands recorded for audit.
+**Today:** files / directories / symlinks / permissions (byte-perfect, crash-safe, with redo and **selective** per-file revert); **network calls** (compensators); **email** (hold-and-release true unsend); **cloud + databases + any CLI** (recorded reversal commands). All external reversals are dry-run gated.
 
-**Roadmap — the rest of the moat:**
+**Roadmap:**
 
-- **More provider packs** — Stripe refund, GitHub revert as drop-in compensators
-- **Database journaling** — capture inverse SQL, roll back a migration
-- **Cloud-resource reversal** — tear down infra the agent spun up
-- **Selective undo** — reverse just the email, keep the file edits
+- **Provider-pack sugar** — one-liner helpers that build the Stripe/GitHub/Gmail compensators for you
 - **`undo diff`** — "show me everything the AI changed," reviewable like a PR
+- **Team control plane** — shared journals + org policy for agent fleets
 
 The novel core is the `Effect` abstraction: anything that can describe its own inverse plugs into the *same* journal and the *same* one-button rollback. Filesystem-only undo exists; **heterogeneous, cross-system undo does not.** That uniform reversibility layer is the point.
 

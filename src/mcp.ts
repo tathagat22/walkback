@@ -15,6 +15,7 @@ import { z } from "zod";
 import engine from "./engine.js";
 import { compensate, renderCompensateResult } from "./compensate.js";
 import { stageEmail, releaseEmail, cancelEmail, listPending } from "./email.js";
+import { recordReversal } from "./reversals.js";
 
 const server = new McpServer({ name: "undo", version: "0.1.0" });
 
@@ -220,13 +221,53 @@ server.registerTool(
 );
 
 server.registerTool(
+  "undo_revert",
+  {
+    title: "Selectively undo one file",
+    description:
+      "Reverse just a single file (the most recent change to it), leaving every other change since " +
+      "the checkpoint in place. The opposite of rollback's all-or-nothing.",
+    inputSchema: {
+      ...cwdSchema,
+      path: z.string().describe("The file to revert."),
+    },
+  },
+  guard(({ cwd, path }) => {
+    const msg = engine.revert(wd(cwd), path);
+    return msg ?? `${path} was not tracked — nothing to revert.`;
+  }),
+);
+
+server.registerTool(
+  "undo_record_reversal",
+  {
+    title: "Record how to reverse a cloud/DB action",
+    description:
+      "Record the command that reverses something the agent did to an external system — a cloud " +
+      "resource (e.g. 'terraform destroy', 'aws s3 rb s3://bucket') or a database change (e.g. an " +
+      "inverse SQL via psql). undo_compensate will run it (dry-run gated). Works with any tool. " +
+      "For UPDATE/DELETE you must capture the prior values to build the inverse — undo runs what you give it.",
+    inputSchema: {
+      ...cwdSchema,
+      description: z.string().describe("What was done, e.g. 'created S3 bucket assets-prod'."),
+      command: z.string().describe("The command that reverses it, e.g. 'aws s3 rb s3://assets-prod'."),
+      runIn: z.string().optional().describe("Directory to run the command in. Defaults to the project."),
+    },
+  },
+  guard(({ cwd, description, command, runIn }) => {
+    recordReversal(wd(cwd), { description, command, cwd: runIn });
+    return `Recorded reversal for "${description}":\n  $ ${command}\n  run it with undo_compensate (execute=true)`;
+  }),
+);
+
+server.registerTool(
   "undo_compensate",
   {
-    title: "Reverse network mutations",
+    title: "Reverse network + cloud/DB actions",
     description:
-      "Execute the compensating requests for the network mutations recorded since the last " +
-      "checkpoint (the DELETE that undoes a POST, the refund that undoes a charge). " +
-      "Dry-run by default — pass execute=true to actually fire the requests. Runs most-recent-first.",
+      "Execute the compensating actions recorded since the last checkpoint: the reversing HTTP " +
+      "request (DELETE undoes POST, refund undoes charge) AND any recorded reversal commands " +
+      "(cloud teardown, inverse SQL). Dry-run by default — pass execute=true to fire them. Most-recent-first.",
     inputSchema: {
       ...cwdSchema,
       execute: z

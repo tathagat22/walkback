@@ -30,6 +30,8 @@ export interface UndoEngine {
   rollback(workdir: string, target?: string | null): string;
   /** Undo the last rollback. Returns a JSON `{ restored, failed }` report. */
   redo(workdir: string): string;
+  /** Selective undo: reverse just one file. Returns a description, or null. */
+  revert(workdir: string, path: string): string | null;
 }
 
 const engine = require("@agent-undo/engine") as UndoEngine;

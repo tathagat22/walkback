@@ -103,3 +103,12 @@ pub fn redo(workdir: String) -> napi::Result<String> {
     let report = open(&workdir)?.redo().map_err(err)?;
     serde_json::to_string(&report).map_err(err)
 }
+
+/// Selective undo: reverse just one file. Returns a description, or null if the
+/// path wasn't tracked.
+#[napi]
+pub fn revert(workdir: String, path: String) -> napi::Result<Option<String>> {
+    open(&workdir)?
+        .revert(std::path::Path::new(&path))
+        .map_err(err)
+}

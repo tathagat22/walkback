@@ -510,6 +510,43 @@ impl Undo {
         Ok(RedoReport { restored, failed })
     }
 
+    /// Selective undo: reverse just one file, leaving every other change in
+    /// place. Reverts the most recent effect recorded for `path` and removes it
+    /// from the journal. Returns a description, or `None` if nothing was tracked
+    /// for that path. Directories aren't selectable (use `rollback`).
+    pub fn revert(&self, path: &Path) -> io::Result<Option<String>> {
+        let _lock = self.lock()?;
+        self.clear_redo();
+        let abs = self.resolve(path);
+        let rows = self.rows()?;
+
+        let idx = rows.iter().rposition(
+            |r| matches!(r, Row::Effect { effect, .. } if effect.path() == Some(abs.as_path())),
+        );
+        let Some(idx) = idx else {
+            return Ok(None);
+        };
+        let effect = match &rows[idx] {
+            Row::Effect { effect, .. } => effect.clone(),
+            _ => unreachable!(),
+        };
+
+        match effect {
+            Effect::File { .. } | Effect::PathCreate { .. } | Effect::Symlink { .. } => {
+                let msg = self.invert(&effect)?;
+                let mut kept = rows;
+                kept.remove(idx);
+                self.rewrite_journal(&kept)?;
+                self.rebuild_state(&kept)?;
+                Ok(msg)
+            }
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "selective revert is for single files — use rollback for directories",
+            )),
+        }
+    }
+
     // ---- snapshot / invert / redo internals --------------------------------
 
     fn snapshot_path(&self, abs: &Path, out: &mut Vec<Effect>) -> io::Result<()> {

@@ -26,3 +26,8 @@ export declare function logJson(workdir: string): string
 export declare function rollback(workdir: string, target?: string | undefined | null): string
 /** Undo the last rollback. Returns a JSON `{ restored, failed }` report. */
 export declare function redo(workdir: string): string
+/**
+ * Selective undo: reverse just one file. Returns a description, or null if the
+ * path wasn't tracked.
+ */
+export declare function revert(workdir: string, path: string): string | null

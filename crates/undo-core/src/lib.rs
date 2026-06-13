@@ -243,6 +243,34 @@ mod tests {
     }
 
     #[test]
+    fn selective_undo_reverts_one_file_keeping_the_rest() {
+        let dir = tmp();
+        let u = Undo::init(&dir).unwrap();
+        fs::write(dir.join("a.txt"), b"A1").unwrap();
+        fs::write(dir.join("b.txt"), b"B1").unwrap();
+        u.checkpoint("c").unwrap();
+
+        u.track(&dir.join("a.txt")).unwrap();
+        u.track(&dir.join("b.txt")).unwrap();
+        fs::write(dir.join("a.txt"), b"A2").unwrap();
+        fs::write(dir.join("b.txt"), b"B2").unwrap();
+
+        // Revert ONLY a.txt.
+        let msg = u.revert(&dir.join("a.txt")).unwrap();
+        assert!(msg.is_some());
+        assert_eq!(fs::read(dir.join("a.txt")).unwrap(), b"A1", "a reverted");
+        assert_eq!(fs::read(dir.join("b.txt")).unwrap(), b"B2", "b untouched");
+
+        // b is still tracked, so a full rollback restores it.
+        u.rollback(None).unwrap();
+        assert_eq!(fs::read(dir.join("b.txt")).unwrap(), b"B1");
+
+        // Reverting an untracked path is a no-op.
+        assert!(u.revert(&dir.join("nope.txt")).unwrap().is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn re_tracking_a_path_is_a_cheap_noop() {
         let dir = tmp();
         let u = Undo::init(&dir).unwrap();

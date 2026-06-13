@@ -9,7 +9,12 @@
 // explicitly passes `execute: true`. Network undo is powerful and one-way, so it
 // is never silent.
 
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import engine from "./engine.js";
+import { listReversals, clearReversals } from "./reversals.js";
+
+const run = promisify(exec);
 
 export type ActionStatus = "planned" | "ok" | "failed" | "no-compensator";
 
@@ -90,6 +95,31 @@ export async function compensate(
       });
     }
   }
+
+  // Command reversals (cloud teardown, DB inverse SQL, anything scriptable),
+  // also most-recent-first. Gated by the same execute flag.
+  const reversals = listReversals(workdir).slice().reverse();
+  const executedIds: string[] = [];
+  for (const r of reversals) {
+    const compensator = `$ ${r.command}`;
+    if (!execute) {
+      actions.push({ original: r.description, compensator, status: "planned" });
+      continue;
+    }
+    try {
+      await run(r.command, { cwd: r.cwd ?? workdir });
+      actions.push({ original: r.description, compensator, status: "ok", detail: "exit 0" });
+      executedIds.push(r.id);
+    } catch (err) {
+      actions.push({
+        original: r.description,
+        compensator,
+        status: "failed",
+        detail: err instanceof Error ? err.message.split("\n")[0] : String(err),
+      });
+    }
+  }
+  if (executedIds.length) clearReversals(workdir, executedIds);
 
   return { executed: execute, actions };
 }
