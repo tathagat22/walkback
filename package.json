@@ -42,7 +42,7 @@
     "build": "tsc",
     "mcp": "tsx src/mcp.ts",
     "demo": "tsx demo/demo.ts",
-    "test": "tsx demo/mcp-smoke.ts && tsx demo/compensate-test.ts",
+    "test": "tsx demo/mcp-smoke.ts && tsx demo/compensate-test.ts && tsx demo/email-test.ts",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

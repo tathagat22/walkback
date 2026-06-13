@@ -221,13 +221,30 @@ undo_compensate execute=true     # fires the refund, most-recent-first
 
 It's **dry-run by default** — network undo is powerful and one-way, so it never fires silently. The same model extends to any service whose actions have an inverse.
 
+## Email undo — exactly what it does (and doesn't)
+
+No tool can truly recall an email once it's been **delivered to someone else's inbox** — the recipient has a copy on their server that nothing you run can touch. Anyone claiming "unsend any email" is lying. So `undo` does the one honest thing that actually works: **it doesn't let the email leave in the first place, until you're sure.**
+
+**How it works — hold and release.** Instead of sending immediately, the agent's email becomes a **Gmail draft that has gone nowhere:**
+
+```
+undo_email_stage   to="boss@co.com" subject="I QUIT" body="..."   # held as a draft, NOT sent
+undo_email_cancel                                                  # delete the draft → it never existed
+undo_email_release                                                 # ...or actually deliver it
+```
+
+- **Before you release it:** `undo_email_cancel` deletes the draft. It was never delivered, the recipient never saw it — a **true unsend.** This is the real, demonstrable guarantee.
+- **After you release it (delivered):** it is **gone.** `undo` will be blunt about this. The most it can honestly do then is trash *your own* copy and/or send a retraction — the recipient still has theirs. That's damage control, and it's labelled as such, never dressed up as "recall."
+
+In short: undo gives the email a **hold window** in which it genuinely never happened. It does **not** pretend to reach into other people's inboxes. `undo` holds no Google credentials itself — it uses a `GMAIL_ACCESS_TOKEN` you supply.
+
 ## What's reversible today, and what's next
 
-**Today:** filesystem create / modify / delete / directories / symlinks / permissions, fully reversed with redo. **Network mutations auto-reversed** via recorded compensators (dry-run gated). Shell commands recorded for audit.
+**Today:** filesystem create / modify / delete / directories / symlinks / permissions, fully reversed with redo. **Network mutations auto-reversed** via recorded compensators (dry-run gated). **Email hold-and-release** (true unsend within the hold window). Shell commands recorded for audit.
 
 **Roadmap — the rest of the moat:**
 
-- **Provider packs** — Stripe refund, GitHub revert, **Gmail email recall** as drop-in compensators
+- **More provider packs** — Stripe refund, GitHub revert as drop-in compensators
 - **Database journaling** — capture inverse SQL, roll back a migration
 - **Cloud-resource reversal** — tear down infra the agent spun up
 - **Selective undo** — reverse just the email, keep the file edits

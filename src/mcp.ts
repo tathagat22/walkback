@@ -14,6 +14,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import engine from "./engine.js";
 import { compensate, renderCompensateResult } from "./compensate.js";
+import { stageEmail, releaseEmail, cancelEmail, listPending } from "./email.js";
 
 const server = new McpServer({ name: "undo", version: "0.1.0" });
 
@@ -242,6 +243,95 @@ server.registerTool(
       return fail(e);
     }
   },
+);
+
+server.registerTool(
+  "undo_email_stage",
+  {
+    title: "Send an email — reversibly (hold as draft)",
+    description:
+      "Hold an email instead of sending it immediately: it becomes a Gmail DRAFT that has gone " +
+      "nowhere. Release it with undo_email_release to actually deliver, or undo_email_cancel to " +
+      "truly unsend it (it never reaches the recipient). Needs GMAIL_ACCESS_TOKEN.",
+    inputSchema: {
+      ...cwdSchema,
+      to: z.string().describe("Recipient email address."),
+      subject: z.string().describe("Subject line."),
+      body: z.string().describe("Plain-text body."),
+    },
+  },
+  async ({ cwd, to, subject, body }) => {
+    try {
+      const e = await stageEmail(wd(cwd), { to, subject, body });
+      return ok(
+        `Held (not sent): "${e.subject}" → ${e.to}  [draft ${e.draftId}]\n` +
+          `  release:  undo_email_release\n  unsend:   undo_email_cancel`,
+      );
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+server.registerTool(
+  "undo_email_release",
+  {
+    title: "Deliver held email(s)",
+    description:
+      "Actually send the held draft(s). After this the email is delivered and CANNOT be recalled.",
+    inputSchema: {
+      ...cwdSchema,
+      draftId: z.string().optional().describe("A specific held draft id, or omit for all."),
+    },
+  },
+  async ({ cwd, draftId }) => {
+    try {
+      const sent = await releaseEmail(wd(cwd), draftId);
+      if (sent.length === 0) return ok("Nothing held to release.");
+      return ok(`Delivered ${sent.length} email(s): ${sent.map((e) => e.to).join(", ")}`);
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+server.registerTool(
+  "undo_email_cancel",
+  {
+    title: "Unsend held email(s)",
+    description:
+      "Delete the held draft(s) so they never go out — a true unsend, possible only because they " +
+      "were never delivered. Does nothing to emails already released.",
+    inputSchema: {
+      ...cwdSchema,
+      draftId: z.string().optional().describe("A specific held draft id, or omit for all."),
+    },
+  },
+  async ({ cwd, draftId }) => {
+    try {
+      const cancelled = await cancelEmail(wd(cwd), draftId);
+      if (cancelled.length === 0) return ok("Nothing held to cancel.");
+      return ok(
+        `Unsent ${cancelled.length} email(s) — never delivered: ${cancelled.map((e) => e.subject).join("; ")}`,
+      );
+    } catch (e) {
+      return fail(e);
+    }
+  },
+);
+
+server.registerTool(
+  "undo_email_pending",
+  {
+    title: "List held emails",
+    description: "Show emails staged but not yet released — these can still be cancelled.",
+    inputSchema: cwdSchema,
+  },
+  guard(({ cwd }) => {
+    const pending = listPending(wd(cwd));
+    if (pending.length === 0) return "No held emails.";
+    return pending.map((e) => `  • "${e.subject}" → ${e.to}  [draft ${e.draftId}]`).join("\n");
+  }),
 );
 
 function describeEffect(e: any): string {
