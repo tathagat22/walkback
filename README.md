@@ -27,28 +27,46 @@ Two seconds later it's like it never happened.
 
 ---
 
-## Zero-effort mode: `undo protect`
+## Works with any AI agent
 
-The catch with any safety tool is that it only helps if it's actually on. So undo can run itself — no agent cooperation, nothing to remember:
+undo is **not tied to any model, vendor, or IDE.** Every agent — whatever it's built on — does one thing in common: it changes files on disk. undo meets it at whichever layer is most convenient, and the reversal is identical underneath:
+
+| Your setup | Turn it on | Covers |
+|---|---|---|
+| **Anything** (Cursor, Copilot, Windsurf, Aider, custom scripts, even you) | `undo watch` | Snapshots, then watches the filesystem. Reversible no matter what made the change. |
+| **Any CLI agent** | `undo run -- <agent-cmd>` | Wraps the command; snapshots first, reversible after. |
+| **Any MCP client** (Cursor, Claude, Windsurf, custom) | add the [MCP server](#use-it-with-an-mcp-client) | The agent calls `undo_checkpoint` / `undo_track` / `undo_rollback` itself. |
+| **Claude Code** | `undo protect` | Native PreToolUse hook — auto-checkpoints every session, zero effort. |
+
+Then, whatever made the mess:
 
 ```bash
-undo protect
-```
-
-That installs a Claude Code **PreToolUse hook**. From then on, before the agent's *first* action in any session, undo silently checkpoints and snapshots your project. Edit, Write, Bash — all of it becomes reversible automatically. If the agent makes a mess:
-
-```bash
-undo rollback     # rewind the whole session
+undo rollback     # rewind everything since the snapshot
 undo redo         # ...changed your mind
 ```
 
-The hook **never blocks or slows the agent** (it exits immediately and always allows the tool), and it skips noise like `node_modules`, `target`, and `.git`. To turn it off: `undo unprotect`.
-
-Not using Claude Code? Wrap any command:
+### `undo watch` — the universal one
 
 ```bash
-undo run -- npm run risky-migration    # snapshots first; `undo rollback` reverses it
+undo watch
 ```
+
+Takes a baseline snapshot, then watches the project. Start it, point *any* agent at the folder, and everything it does is reversible — no integration, no cooperation, no model-specific anything. It skips noise (`node_modules`, `target`, `.git`), shows changes live, and stops on Ctrl-C.
+
+### `undo run` — wrap any command
+
+```bash
+undo run -- aider                      # or codex, or your own agent script
+undo run -- npm run risky-migration
+```
+
+### `undo protect` — native Claude Code hook
+
+```bash
+undo protect      # installs a PreToolUse hook; undo unprotect removes it
+```
+
+The hook **never blocks or slows the agent** (exits immediately, always allows the tool) and auto-checkpoints before the agent's first action each session.
 
 ---
 
@@ -105,9 +123,9 @@ npm run build:engine   # builds the native Rust engine
 npm run build          # compiles the TypeScript
 ```
 
-## Use it with Claude Code
+## Use it with an MCP client
 
-Add to your `.mcp.json`:
+Any MCP-speaking client (Cursor, Claude Desktop/Code, Windsurf, or your own agent) can drive undo directly. Add it to that client's MCP config — e.g. `.mcp.json`:
 
 ```json
 {
@@ -120,7 +138,7 @@ Add to your `.mcp.json`:
 }
 ```
 
-Then tell your agent: *"Before you start, checkpoint with undo and track every file you touch."* The agent calls `undo_checkpoint` and `undo_track` as it works; you call `undo_rollback` (or ask it to) if anything goes sideways.
+Then tell your agent: *"Before you start, checkpoint with undo and track every file you touch."* The agent calls `undo_checkpoint` and `undo_track` as it works; you call `undo_rollback` (or ask it to) if anything goes sideways. Prefer not to rely on the agent cooperating? Use `undo watch` instead — it captures everything regardless.
 
 ### MCP tools
 
@@ -146,9 +164,10 @@ undo log                       the full history
 undo rollback [checkpoint]     rewind everything since a checkpoint
 undo redo                      undo the last rollback
 
+undo watch                     snapshot + watch the filesystem (any agent, any tool)
+undo run -- <command>          snapshot, then run any command reversibly
 undo protect                   install the Claude Code auto-capture hook
 undo unprotect                 remove the hook
-undo run -- <command>          snapshot, then run any command reversibly
 ```
 
 ## Why you can trust it
