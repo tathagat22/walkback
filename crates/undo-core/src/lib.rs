@@ -210,4 +210,49 @@ mod tests {
         assert!(gi.contains(".undo/"), "init should gitignore .undo");
         fs::remove_dir_all(&dir).ok();
     }
+
+    #[test]
+    fn ignores_noise_directories() {
+        let dir = tmp();
+        let u = Undo::init(&dir).unwrap();
+        fs::create_dir_all(dir.join("node_modules/pkg")).unwrap();
+        fs::write(dir.join("node_modules/pkg/index.js"), b"dep").unwrap();
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("src/main.rs"), b"ORIGINAL").unwrap();
+        u.checkpoint("c").unwrap();
+
+        // Track the whole project root.
+        u.track(&dir).unwrap();
+
+        // Agent touches both a real source file and node_modules.
+        fs::write(dir.join("src/main.rs"), b"EDITED").unwrap();
+        fs::write(dir.join("node_modules/pkg/index.js"), b"changed dep").unwrap();
+        fs::write(dir.join("node_modules/added.js"), b"new dep file").unwrap();
+
+        u.rollback(None).unwrap();
+
+        // Real source is restored...
+        assert_eq!(fs::read(dir.join("src/main.rs")).unwrap(), b"ORIGINAL");
+        // ...but node_modules is left entirely alone (never captured, never pruned).
+        assert_eq!(
+            fs::read(dir.join("node_modules/pkg/index.js")).unwrap(),
+            b"changed dep"
+        );
+        assert!(dir.join("node_modules/added.js").exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn re_tracking_a_path_is_a_cheap_noop() {
+        let dir = tmp();
+        let u = Undo::init(&dir).unwrap();
+        fs::write(dir.join("a.txt"), b"v1").unwrap();
+        u.checkpoint("c").unwrap();
+
+        let first = u.track(&dir.join("a.txt")).unwrap();
+        assert_eq!(first.len(), 1, "first track records the file");
+        let second = u.track(&dir.join("a.txt")).unwrap();
+        assert!(second.is_empty(), "re-tracking is a no-op");
+        fs::remove_dir_all(&dir).ok();
+    }
 }

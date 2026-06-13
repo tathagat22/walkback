@@ -309,6 +309,11 @@ impl Undo {
         Ok(self.load_state()?.current_checkpoint)
     }
 
+    /// The project root (the directory containing `.undo`).
+    pub fn workdir(&self) -> &Path {
+        &self.workdir
+    }
+
     /// Capture a path (and, if it's a directory, everything under it) before the
     /// agent changes it. Returns the effects recorded. New forward activity here
     /// invalidates any pending redo.
@@ -318,6 +323,16 @@ impl Undo {
         let mut st = self.load_state()?;
         let abs = self.resolve(path);
         self.guard(&abs)?;
+
+        // Cheap idempotency: if this exact path is already captured under the
+        // current checkpoint, re-tracking is a no-op. This is what makes
+        // re-tracking the project root (every Bash / session) O(1) instead of
+        // re-hashing the whole tree.
+        let abs_key = abs.to_string_lossy().to_string();
+        if st.tracked.iter().any(|t| t == &abs_key) {
+            return Ok(vec![]);
+        }
+
         let cp = self.ensure_cp(&mut st)?;
 
         let mut effects = vec![];
@@ -521,8 +536,8 @@ impl Undo {
                     for ent in fs::read_dir(abs)? {
                         let ent = ent?;
                         let child = ent.path();
-                        if child == self.root {
-                            continue; // never descend into our own .undo
+                        if child == self.root || is_ignored_name(&ent.file_name()) {
+                            continue; // never descend into .undo or noise dirs
                         }
                         entries.push(ent.file_name().to_string_lossy().to_string());
                         children.push(child);
@@ -591,8 +606,8 @@ impl Undo {
                 for ent in fs::read_dir(path)? {
                     let ent = ent?;
                     let child = ent.path();
-                    if child == self.root {
-                        continue;
+                    if child == self.root || is_ignored_name(&ent.file_name()) {
+                        continue; // never prune .undo or ignored dirs (node_modules, etc.)
                     }
                     let name = ent.file_name().to_string_lossy().to_string();
                     if !keep.contains(name.as_str()) {
@@ -642,7 +657,7 @@ impl Undo {
                     for ent in fs::read_dir(p)? {
                         let ent = ent?;
                         let child = ent.path();
-                        if child == self.root {
+                        if child == self.root || is_ignored_name(&ent.file_name()) {
                             continue;
                         }
                         self.capture_after_path(&child, seen, out)?;
@@ -774,6 +789,37 @@ fn order_key(s: &AfterSnap) -> (u8, isize) {
         AfterState::Absent => (1, -depth),
         _ => (0, depth),
     }
+}
+
+/// Directory names that are never captured by undo (and never pruned on
+/// rollback). These are noise — regenerable build output, dependency caches,
+/// VCS internals — that would bloat snapshots and slow whole-project tracking
+/// to no benefit. Kept as a deliberate, documented default; finer `.gitignore`
+/// awareness can layer on top later without changing any call site.
+const IGNORED_DIRS: &[&str] = &[
+    ".git",
+    ".undo",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    ".turbo",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".gradle",
+    ".idea",
+    ".cargo",
+    "vendor",
+];
+
+fn is_ignored_name(name: &std::ffi::OsStr) -> bool {
+    name.to_str().is_some_and(|n| IGNORED_DIRS.contains(&n))
 }
 
 fn remove_any(path: &Path) -> io::Result<()> {
