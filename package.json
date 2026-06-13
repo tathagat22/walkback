@@ -31,6 +31,9 @@
   "engines": {
     "node": ">=18"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "workspaces": [
     "crates/undo-napi"
   ],
@@ -40,7 +43,7 @@
     "mcp": "tsx src/mcp.ts",
     "demo": "tsx demo/demo.ts",
     "test": "tsx demo/mcp-smoke.ts",
-    "prepublishOnly": "npm run build:engine && npm run build"
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@agent-undo/engine": "0.1.0",

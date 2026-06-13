@@ -5,6 +5,10 @@
   "main": "index.js",
   "types": "index.d.ts",
   "license": "MIT",
+  "repository": "https://github.com/tathagat22/agent-undo",
+  "publishConfig": {
+    "access": "public"
+  },
   "napi": {
     "name": "undo-engine",
     "triples": {
@@ -21,7 +25,8 @@
   ],
   "scripts": {
     "build": "napi build --platform --release",
-    "build:debug": "napi build --platform"
+    "build:debug": "napi build --platform",
+    "prepublishOnly": "napi prepublish -t npm --skip-gh-release"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.4"

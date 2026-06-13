@@ -1,9 +1,10 @@
 name: Release npm
 
 # Builds the native NAPI engine for every platform and publishes the npm
-# packages (so `npm i @agent-undo/core` needs no Rust toolchain). Mirrors the
-# canonical napi-rs release pattern: build per-target -> collect artifacts ->
-# prepublish platform packages -> publish.
+# packages (so `npm i @agent-undo/core` needs no Rust toolchain). Follows the
+# canonical napi-rs release flow: build per target -> collect artifacts ->
+# `npm publish` (the package's prepublishOnly hook runs `napi prepublish`, which
+# publishes the per-platform packages and wires up optionalDependencies).
 #
 # Requires repo secret NPM_TOKEN and the `@agent-undo` npm org (see RELEASING.md).
 
@@ -58,7 +59,7 @@ jobs:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
 
-      - name: Install deps (root + napi workspace)
+      - name: Install deps
         run: npm install
 
       - name: Download all built addons
@@ -66,24 +67,25 @@ jobs:
         with:
           path: crates/undo-napi/artifacts
 
-      - name: Assemble per-platform packages
+      # `napi artifacts` creates the npm/<platform> dirs and moves each .node in.
+      - name: Collect artifacts into platform packages
         working-directory: crates/undo-napi
         run: |
-          npx napi create-npm-dir -t .
           npx napi artifacts --dir artifacts
           ls -R npm
 
-      # Publishes @agent-undo/engine-<platform> packages and updates the main
-      # @agent-undo/engine package's optionalDependencies.
-      - name: Publish engine packages
+      # `npm publish` triggers prepublishOnly -> `napi prepublish`, which publishes
+      # @agent-undo/engine-<platform> (with --access public) and updates this
+      # package's optionalDependencies, then publishes @agent-undo/engine itself.
+      - name: Publish @agent-undo/engine (+ platform packages)
         working-directory: crates/undo-napi
-        run: npx napi prepublish -t npm --skip-gh-release
+        run: npm publish --access public
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      # Publish the MCP server package (@agent-undo/core), which depends on the engine.
-      - name: Build & publish @agent-undo/core
+      # The MCP server package depends on @agent-undo/engine published above.
+      - name: Publish @agent-undo/core
         run: |
           npm run build
           npm publish --access public

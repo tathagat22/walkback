@@ -7,10 +7,9 @@ node_modules
 dist
 *.tsbuildinfo
 
-# NAPI build artifacts
+# NAPI build artifacts (the .node binaries; index.js/index.d.ts ARE committed —
+# they're the platform-independent loader + types the published package needs)
 *.node
-crates/undo-napi/index.js
-crates/undo-napi/index.d.ts
 
 # undo's own working dir (never commit captured snapshots)
 .undo
