@@ -13,6 +13,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import engine from "./engine.js";
+import { compensate, renderCompensateResult } from "./compensate.js";
 
 const server = new McpServer({ name: "undo", version: "0.1.0" });
 
@@ -215,6 +216,32 @@ server.registerTool(
     if (r.failed?.length) lines.push("Failed:", ...r.failed.map((x: string) => "  ✗ " + x));
     return lines.join("\n");
   }),
+);
+
+server.registerTool(
+  "undo_compensate",
+  {
+    title: "Reverse network mutations",
+    description:
+      "Execute the compensating requests for the network mutations recorded since the last " +
+      "checkpoint (the DELETE that undoes a POST, the refund that undoes a charge). " +
+      "Dry-run by default — pass execute=true to actually fire the requests. Runs most-recent-first.",
+    inputSchema: {
+      ...cwdSchema,
+      execute: z
+        .boolean()
+        .optional()
+        .describe("If true, actually send the compensating requests. Defaults to false (preview)."),
+    },
+  },
+  async ({ cwd, execute }) => {
+    try {
+      const result = await compensate(wd(cwd), execute ?? false);
+      return ok(renderCompensateResult(result));
+    } catch (e) {
+      return fail(e);
+    }
+  },
 );
 
 function describeEffect(e: any): string {

@@ -208,19 +208,30 @@ npm run mcp -- ...  # or run the MCP server on stdio
 npx tsx demo/mcp-smoke.ts   # drives the real MCP server through a full scenario
 ```
 
+## Beyond files: reversing network calls
+
+This is the part git — and every file-only "undo" — cannot do. When an agent records a network mutation, it records a **compensator**: the request that reverses it. `undo` can then actually *run* it.
+
+```
+agent: POST https://api.stripe.com/v1/charges        (records: refund as compensator)
+
+undo_compensate                  # dry run — shows what WOULD be reversed
+undo_compensate execute=true     # fires the refund, most-recent-first
+```
+
+It's **dry-run by default** — network undo is powerful and one-way, so it never fires silently. The same model extends to any service whose actions have an inverse.
+
 ## What's reversible today, and what's next
 
-**Today (v0):** filesystem create / modify / delete, fully reversed. Shell commands and HTTP mutations are recorded (with compensating requests) and surfaced for manual handling.
+**Today:** filesystem create / modify / delete / directories / symlinks / permissions, fully reversed with redo. **Network mutations auto-reversed** via recorded compensators (dry-run gated). Shell commands recorded for audit.
 
-**Roadmap — the part nobody has built:**
+**Roadmap — the rest of the moat:**
 
-- **HTTP mutation reversal** — auto-run the compensating request to undo a network call
-- **Email undo** — recall/delete within the provider's window
+- **Provider packs** — Stripe refund, GitHub revert, **Gmail email recall** as drop-in compensators
 - **Database journaling** — capture inverse SQL, roll back a migration
 - **Cloud-resource reversal** — tear down infra the agent spun up
 - **Selective undo** — reverse just the email, keep the file edits
 - **`undo diff`** — "show me everything the AI changed," reviewable like a PR
-- **Redo** — roll forward again after rolling back
 
 The novel core is the `Effect` abstraction: anything that can describe its own inverse plugs into the *same* journal and the *same* one-button rollback. Filesystem-only undo exists; **heterogeneous, cross-system undo does not.** That uniform reversibility layer is the point.
 
