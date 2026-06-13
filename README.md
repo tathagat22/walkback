@@ -27,6 +27,31 @@ Two seconds later it's like it never happened.
 
 ---
 
+## Zero-effort mode: `undo protect`
+
+The catch with any safety tool is that it only helps if it's actually on. So undo can run itself — no agent cooperation, nothing to remember:
+
+```bash
+undo protect
+```
+
+That installs a Claude Code **PreToolUse hook**. From then on, before the agent's *first* action in any session, undo silently checkpoints and snapshots your project. Edit, Write, Bash — all of it becomes reversible automatically. If the agent makes a mess:
+
+```bash
+undo rollback     # rewind the whole session
+undo redo         # ...changed your mind
+```
+
+The hook **never blocks or slows the agent** (it exits immediately and always allows the tool), and it skips noise like `node_modules`, `target`, and `.git`. To turn it off: `undo unprotect`.
+
+Not using Claude Code? Wrap any command:
+
+```bash
+undo run -- npm run risky-migration    # snapshots first; `undo rollback` reverses it
+```
+
+---
+
 ## How it works
 
 Every action an agent takes becomes a journal entry that knows **how to reverse itself** — think *git + a flight recorder, but for side effects instead of just files*.
@@ -120,6 +145,10 @@ undo status                    what's changed since the last checkpoint
 undo log                       the full history
 undo rollback [checkpoint]     rewind everything since a checkpoint
 undo redo                      undo the last rollback
+
+undo protect                   install the Claude Code auto-capture hook
+undo unprotect                 remove the hook
+undo run -- <command>          snapshot, then run any command reversibly
 ```
 
 ## Why you can trust it

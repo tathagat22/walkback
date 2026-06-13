@@ -8,8 +8,10 @@
 //!   undo rollback [checkpoint]     rewind everything since a checkpoint
 //!   undo redo                      undo the last rollback
 
+use serde_json::json;
 use std::env;
-use std::io;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::process::exit;
 use undo_core::{Row, Undo};
 
@@ -26,6 +28,10 @@ fn main() {
         "log" => cmd_log(),
         "rollback" | "undo" => cmd_rollback(rest),
         "redo" => cmd_redo(),
+        "run" => cmd_run(rest),
+        "protect" => cmd_protect(),
+        "unprotect" => cmd_unprotect(),
+        "hook" => cmd_hook(),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(())
@@ -206,6 +212,239 @@ fn cmd_redo() -> io::Result<()> {
     Ok(())
 }
 
+/// Open the project's undo, creating it if this is a fresh project.
+fn discover_or_init(dir: &Path) -> io::Result<Undo> {
+    match Undo::discover(dir)? {
+        Some(u) => Ok(u),
+        None => Undo::init(dir),
+    }
+}
+
+/// `undo run -- <command>` — snapshot the whole project, then run a command.
+/// Whatever the command does to the working tree is reversible with one
+/// `undo rollback`. Pre-state is captured up front, so no filesystem watcher
+/// (which could only see changes *after* they happen) is needed.
+fn cmd_run(rest: &[String]) -> io::Result<()> {
+    let cmd: &[String] = match rest.first() {
+        Some(first) if first == "--" => &rest[1..],
+        _ => rest,
+    };
+    if cmd.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: undo run -- <command> [args...]",
+        ));
+    }
+    let cwd = env::current_dir()?;
+    let u = discover_or_init(&cwd)?;
+    let root = u.workdir().to_path_buf();
+    let id = u.checkpoint(&format!("run: {}", cmd.join(" ")))?;
+    u.track(&root)?;
+    println!("\x1b[2m✓ snapshot {id} taken — `undo rollback` reverses anything below\x1b[0m\n");
+    let status = std::process::Command::new(&cmd[0])
+        .args(&cmd[1..])
+        .current_dir(&cwd)
+        .status()?;
+    exit(status.code().unwrap_or(1));
+}
+
+/// `undo protect` — install a Claude Code PreToolUse hook so every session is
+/// auto-checkpointed. Zero effort: the agent doesn't have to cooperate.
+fn cmd_protect() -> io::Result<()> {
+    let cwd = env::current_dir()?;
+    discover_or_init(&cwd)?;
+    let root = Undo::discover(&cwd)?
+        .map(|u| u.workdir().to_path_buf())
+        .unwrap_or(cwd);
+
+    let exe = env::current_exe()?;
+    let command = format!("\"{}\" hook", exe.display());
+    let settings_path = settings_path(&root);
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut settings = read_json(&settings_path)?;
+    if !settings.is_object() {
+        settings = json!({});
+    }
+    let arr = pretooluse_array(&mut settings);
+    let already = arr
+        .iter()
+        .any(|e| entry_command(e).as_deref() == Some(command.as_str()));
+    if already {
+        println!(
+            "\x1b[32m✓\x1b[0m already protected (hook present in {})",
+            settings_path.display()
+        );
+        return Ok(());
+    }
+    arr.push(json!({
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [ { "type": "command", "command": command } ]
+    }));
+    write_json(&settings_path, &settings)?;
+
+    println!("\x1b[32m✓\x1b[0m undo is now protecting this project");
+    println!(
+        "  \x1b[2mhook installed in {}\x1b[0m",
+        settings_path.display()
+    );
+    println!("  every Claude Code session is auto-checkpointed before the agent acts");
+    println!("  reverse the last session anytime:  \x1b[1mundo rollback\x1b[0m");
+    Ok(())
+}
+
+/// `undo unprotect` — remove the hook this tool installed.
+fn cmd_unprotect() -> io::Result<()> {
+    let cwd = env::current_dir()?;
+    let root = Undo::discover(&cwd)?
+        .map(|u| u.workdir().to_path_buf())
+        .unwrap_or(cwd);
+    let exe = env::current_exe()?;
+    let settings_path = settings_path(&root);
+    let mut settings = read_json(&settings_path)?;
+    let mut removed = false;
+    if let Some(arr) = settings
+        .get_mut("hooks")
+        .and_then(|h| h.get_mut("PreToolUse"))
+        .and_then(|p| p.as_array_mut())
+    {
+        let before = arr.len();
+        arr.retain(|e| !entry_is_ours(e, &exe));
+        removed = arr.len() != before;
+    }
+    if removed {
+        write_json(&settings_path, &settings)?;
+        println!(
+            "\x1b[32m✓\x1b[0m undo hook removed from {}",
+            settings_path.display()
+        );
+    } else {
+        println!("nothing to remove (no undo hook found)");
+    }
+    Ok(())
+}
+
+/// `undo hook` — invoked by Claude Code before each tool runs. Reads the
+/// PreToolUse JSON on stdin and, once per session, checkpoints + snapshots the
+/// project so the whole session is reversible. It NEVER blocks the agent: any
+/// error is logged and we still exit 0.
+fn cmd_hook() -> io::Result<()> {
+    let mut input = String::new();
+    let _ = io::stdin().read_to_string(&mut input);
+    if let Err(e) = run_hook(&input) {
+        eprintln!("undo hook (non-fatal): {e}");
+    }
+    Ok(()) // exit 0 — the agent always proceeds
+}
+
+fn run_hook(input: &str) -> io::Result<()> {
+    let v: serde_json::Value = serde_json::from_str(input).unwrap_or(serde_json::Value::Null);
+    let cwd = v
+        .get("cwd")
+        .and_then(|x| x.as_str())
+        .map(PathBuf::from)
+        .map(Ok)
+        .unwrap_or_else(env::current_dir)?;
+    let session = v
+        .get("session_id")
+        .and_then(|x| x.as_str())
+        .unwrap_or("default");
+
+    let u = discover_or_init(&cwd)?;
+    let root = u.workdir().to_path_buf();
+    let sessions = root.join(Undo::dir_name()).join("sessions");
+    std::fs::create_dir_all(&sessions)?;
+    let marker = sessions.join(sanitize(session));
+
+    // One checkpoint per Claude session.
+    if !marker.exists() {
+        let short = &session[..session.len().min(8)];
+        let id = u.checkpoint(&format!("claude session {short}"))?;
+        std::fs::write(&marker, id)?;
+    }
+
+    // Always ensure the project is snapshotted under the current checkpoint.
+    // This is a cheap no-op when already tracked, and it self-heals after a
+    // mid-session rollback (which clears the snapshot but keeps the checkpoint).
+    u.track(&root)?;
+    Ok(())
+}
+
+// ---- small helpers for the hook/protect commands --------------------------
+
+fn settings_path(root: &Path) -> PathBuf {
+    // settings.local.json is machine-local and gitignored, so an absolute
+    // binary path here never pollutes the committed repo or breaks teammates.
+    root.join(".claude").join("settings.local.json")
+}
+
+fn read_json(path: &Path) -> io::Result<serde_json::Value> {
+    match std::fs::read(path) {
+        Ok(b) => Ok(serde_json::from_slice(&b).unwrap_or_else(|_| json!({}))),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(json!({})),
+        Err(e) => Err(e),
+    }
+}
+
+fn write_json(path: &Path, value: &serde_json::Value) -> io::Result<()> {
+    let mut body = serde_json::to_vec_pretty(value)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    body.push(b'\n');
+    std::fs::write(path, body)
+}
+
+/// Navigate to `settings.hooks.PreToolUse` as a mutable array, creating the
+/// nesting (and repairing non-conforming types) as needed.
+fn pretooluse_array(settings: &mut serde_json::Value) -> &mut Vec<serde_json::Value> {
+    let obj = settings.as_object_mut().expect("settings is an object");
+    let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
+    if !hooks.is_object() {
+        *hooks = json!({});
+    }
+    let pre = hooks
+        .as_object_mut()
+        .unwrap()
+        .entry("PreToolUse")
+        .or_insert_with(|| json!([]));
+    if !pre.is_array() {
+        *pre = json!([]);
+    }
+    pre.as_array_mut().unwrap()
+}
+
+/// The first command string inside a PreToolUse entry, if any.
+fn entry_command(entry: &serde_json::Value) -> Option<String> {
+    entry
+        .get("hooks")?
+        .as_array()?
+        .iter()
+        .find_map(|h| h.get("command").and_then(|c| c.as_str()).map(String::from))
+}
+
+fn entry_is_ours(entry: &serde_json::Value, exe: &Path) -> bool {
+    let exe = exe.display().to_string();
+    entry
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|hs| {
+            hs.iter().any(|h| {
+                h.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains(&exe) && c.contains("hook"))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn sanitize(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
 fn print_help() {
     println!(
         "\x1b[1mundo\x1b[0m — Ctrl-Z for AI agents\n\n\
@@ -219,6 +458,12 @@ fn print_help() {
          \x20 log                      the full history\n\
          \x20 rollback [checkpoint]    rewind everything since a checkpoint\n\
          \x20 redo                     undo the last rollback\n\
+         \n\
+         AUTO-CAPTURE\n\
+         \x20 protect                  install a Claude Code hook to auto-checkpoint every session\n\
+         \x20 unprotect                remove the Claude Code hook\n\
+         \x20 run -- <command>         snapshot the project, then run any command reversibly\n\
+         \n\
          \x20 version                  print version"
     );
 }
