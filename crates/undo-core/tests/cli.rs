@@ -91,6 +91,24 @@ fn hook_auto_checkpoints_so_edits_are_reversible() {
 }
 
 #[test]
+fn watch_baseline_makes_any_change_reversible() {
+    let dir = tmp();
+    fs::write(dir.join("f.txt"), b"BASE").unwrap();
+
+    // `--once` takes the baseline snapshot and returns (no daemon loop), which
+    // is the agent-agnostic guarantee: anything that changes afterwards reverses.
+    run(&dir, &["watch", "--once"]);
+
+    fs::write(dir.join("f.txt"), b"SOME AGENT EDITED THIS").unwrap();
+    fs::write(dir.join("extra.txt"), b"and added this").unwrap();
+
+    run(&dir, &["rollback"]);
+    assert_eq!(fs::read(dir.join("f.txt")).unwrap(), b"BASE");
+    assert!(!dir.join("extra.txt").exists(), "agent-added file pruned");
+    fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn protect_installs_then_unprotect_removes_the_hook() {
     let dir = tmp();
     run(&dir, &["protect"]);

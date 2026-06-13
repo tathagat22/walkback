@@ -822,6 +822,16 @@ fn is_ignored_name(name: &std::ffi::OsStr) -> bool {
     name.to_str().is_some_and(|n| IGNORED_DIRS.contains(&n))
 }
 
+/// True if any component of `path` is an ignored directory (e.g. `node_modules`,
+/// `.git`, `.undo`). The watcher uses this to filter events with the exact same
+/// definition the snapshotter uses, so the two never disagree.
+pub fn path_is_ignored(path: &Path) -> bool {
+    path.components().any(|c| match c {
+        Component::Normal(n) => is_ignored_name(n),
+        _ => false,
+    })
+}
+
 fn remove_any(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),

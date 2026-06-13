@@ -9,10 +9,15 @@
 //!   undo redo                      undo the last rollback
 
 use serde_json::json;
+use std::collections::BTreeSet;
 use std::env;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::exit;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, RecvTimeoutError};
+use std::sync::Arc;
+use std::time::Duration;
 use undo_core::{Row, Undo};
 
 fn main() {
@@ -29,6 +34,7 @@ fn main() {
         "rollback" | "undo" => cmd_rollback(rest),
         "redo" => cmd_redo(),
         "run" => cmd_run(rest),
+        "watch" => cmd_watch(rest),
         "protect" => cmd_protect(),
         "unprotect" => cmd_unprotect(),
         "hook" => cmd_hook(),
@@ -248,6 +254,76 @@ fn cmd_run(rest: &[String]) -> io::Result<()> {
     exit(status.code().unwrap_or(1));
 }
 
+/// `undo watch` — the universal, any-agent safety net. Snapshots the project,
+/// then watches the filesystem. Because the one thing every AI agent does —
+/// regardless of model, vendor, or IDE — is change files on disk, this works
+/// with all of them (Cursor, Copilot, Aider, Windsurf, custom scripts) with
+/// zero integration. Everything that changes while watching is reversible with
+/// one `undo rollback`.
+fn cmd_watch(rest: &[String]) -> io::Result<()> {
+    let once = rest.iter().any(|a| a == "--once");
+    let cwd = env::current_dir()?;
+    let u = discover_or_init(&cwd)?;
+    let root = u.workdir().to_path_buf();
+
+    let id = u.checkpoint("watch session")?;
+    u.track(&root)?; // baseline: captures pre-state of the whole (filtered) tree
+
+    println!(
+        "\x1b[32m✓\x1b[0m watching \x1b[1m{}\x1b[0m  (baseline {id})",
+        root.display()
+    );
+    println!("  \x1b[2many agent's changes here are now reversible — works with any tool\x1b[0m");
+    if once {
+        return Ok(());
+    }
+    println!("  \x1b[2mCtrl-C to stop, then `undo rollback` to reverse everything\x1b[0m\n");
+
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+    let _ = ctrlc::set_handler(move || r.store(false, Ordering::SeqCst));
+
+    let (tx, rx) = channel();
+    let mut watcher = notify::recommended_watcher(move |res| {
+        let _ = tx.send(res);
+    })
+    .map_err(notify_err)?;
+    notify::Watcher::watch(&mut watcher, &root, notify::RecursiveMode::Recursive)
+        .map_err(notify_err)?;
+
+    // Debounce: collect changed paths, print them after a quiet moment. We only
+    // *report* changes — the baseline snapshot already makes them reversible, so
+    // re-tracking here would wrongly protect agent-created files from pruning.
+    let mut pending: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut total = 0usize;
+    while running.load(Ordering::SeqCst) {
+        match rx.recv_timeout(Duration::from_millis(400)) {
+            Ok(Ok(event)) => {
+                for p in event.paths {
+                    if !undo_core::path_is_ignored(&p) {
+                        pending.insert(p);
+                    }
+                }
+            }
+            Ok(Err(_)) => {}
+            Err(RecvTimeoutError::Timeout) => {
+                for p in std::mem::take(&mut pending) {
+                    let rel = p.strip_prefix(&root).unwrap_or(&p);
+                    println!("  \x1b[2m~\x1b[0m {}", rel.display());
+                    total += 1;
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+
+    println!("\n\x1b[32m✓\x1b[0m stopped — {total} change event(s) captured under {id}");
+    println!(
+        "  \x1b[1mundo rollback\x1b[0m reverses everything since the baseline, or just leave it"
+    );
+    Ok(())
+}
+
 /// `undo protect` — install a Claude Code PreToolUse hook so every session is
 /// auto-checkpointed. Zero effort: the agent doesn't have to cooperate.
 fn cmd_protect() -> io::Result<()> {
@@ -445,6 +521,10 @@ fn sanitize(s: &str) -> String {
         .collect()
 }
 
+fn notify_err(e: notify::Error) -> io::Error {
+    io::Error::other(e)
+}
+
 fn print_help() {
     println!(
         "\x1b[1mundo\x1b[0m — Ctrl-Z for AI agents\n\n\
@@ -459,10 +539,11 @@ fn print_help() {
          \x20 rollback [checkpoint]    rewind everything since a checkpoint\n\
          \x20 redo                     undo the last rollback\n\
          \n\
-         AUTO-CAPTURE\n\
+         AUTO-CAPTURE (works with any AI agent)\n\
+         \x20 watch                    snapshot, then watch the filesystem — reversible for ANY agent\n\
+         \x20 run -- <command>         snapshot the project, then run any command reversibly\n\
          \x20 protect                  install a Claude Code hook to auto-checkpoint every session\n\
          \x20 unprotect                remove the Claude Code hook\n\
-         \x20 run -- <command>         snapshot the project, then run any command reversibly\n\
          \n\
          \x20 version                  print version"
     );

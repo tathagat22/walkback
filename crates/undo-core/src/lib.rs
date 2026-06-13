@@ -18,7 +18,7 @@ mod meta;
 mod store;
 
 pub use effect::{Effect, HttpCompensator};
-pub use journal::{RedoReport, RollbackReport, Row, Status, Undo};
+pub use journal::{path_is_ignored, RedoReport, RollbackReport, Row, Status, Undo};
 pub use store::Store;
 
 #[cfg(test)]
