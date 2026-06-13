@@ -1,32 +1,49 @@
 //! An `Effect` is a single change an agent made to the world, paired with
 //! enough information to reverse it. This is the heart of the whole system:
-//! anything that can describe its own inverse — a file, a network call, an
-//! email — fits into the same journal and the same one-button rollback.
+//! anything that can describe its own inverse — a file, a directory, a symlink,
+//! a network call — fits into the same journal and the same one-button rollback.
 
+use crate::meta::Meta;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// A reversible (or at least auditable) side effect.
 ///
-/// `Fs*` variants are fully reversible in v0. `HttpMutation` and `Exec` are
-/// recorded for audit and carry the shape needed to reverse them later, but
-/// are not auto-reversed tonight (network/shell undo is the roadmap moat).
+/// The `Path*` / `File` / `Symlink` / `Dir` variants are fully reversible.
+/// `HttpMutation` and `Exec` are recorded for audit and carry the shape needed
+/// to reverse them later, but are not auto-reversed yet.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Effect {
-    /// A file that did not exist before the agent acted. Inverse: delete it.
-    FileCreate { path: PathBuf },
+    /// A path that did not exist when we captured it. Inverse: delete whatever
+    /// is now there (file, symlink, or whole directory tree).
+    PathCreate { path: PathBuf },
 
-    /// A file whose prior contents were captured into the blob store.
-    /// Inverse: restore those contents.
-    FileModify { path: PathBuf, prev_blob: String },
+    /// A regular file whose prior contents + metadata were captured.
+    /// Inverse: restore the contents and re-apply mode/mtime.
+    File {
+        path: PathBuf,
+        prev_blob: String,
+        #[serde(default)]
+        meta: Meta,
+    },
 
-    /// A file that existed and was (or will be) deleted. Inverse: recreate it
-    /// from the captured blob.
-    FileDelete { path: PathBuf, prev_blob: String },
+    /// A symlink that existed at capture time. Inverse: recreate it pointing at
+    /// `target` (we snapshot the link itself, never the file it points to).
+    Symlink { path: PathBuf, target: PathBuf },
+
+    /// A directory that existed at capture time, plus the names of its immediate
+    /// children. Inverse: ensure the directory exists with its mode, and prune
+    /// any children the agent *added* that weren't here originally.
+    Dir {
+        path: PathBuf,
+        #[serde(default)]
+        mode: u32,
+        entries: Vec<String>,
+    },
 
     /// A network mutation (POST/PUT/PATCH/DELETE). The `compensator` is the
-    /// request that reverses it (e.g. a DELETE to undo a POST). Recorded in v0.
+    /// request that reverses it (e.g. a DELETE to undo a POST). Recorded only.
     HttpMutation {
         method: String,
         url: String,
@@ -46,20 +63,24 @@ pub struct HttpCompensator {
 }
 
 impl Effect {
-    /// Can this effect be reversed automatically by the v0 engine?
+    /// Can this effect be reversed automatically?
     pub fn reversible(&self) -> bool {
         matches!(
             self,
-            Effect::FileCreate { .. } | Effect::FileModify { .. } | Effect::FileDelete { .. }
+            Effect::PathCreate { .. }
+                | Effect::File { .. }
+                | Effect::Symlink { .. }
+                | Effect::Dir { .. }
         )
     }
 
     /// The filesystem path this effect concerns, if any.
     pub fn path(&self) -> Option<&Path> {
         match self {
-            Effect::FileCreate { path }
-            | Effect::FileModify { path, .. }
-            | Effect::FileDelete { path, .. } => Some(path),
+            Effect::PathCreate { path }
+            | Effect::File { path, .. }
+            | Effect::Symlink { path, .. }
+            | Effect::Dir { path, .. } => Some(path),
             _ => None,
         }
     }
@@ -67,9 +88,10 @@ impl Effect {
     /// A short, human-readable, log-friendly description.
     pub fn describe(&self) -> String {
         match self {
-            Effect::FileCreate { path } => format!("created  {}", path.display()),
-            Effect::FileModify { path, .. } => format!("modified {}", path.display()),
-            Effect::FileDelete { path, .. } => format!("deleted  {}", path.display()),
+            Effect::PathCreate { path } => format!("created  {}", path.display()),
+            Effect::File { path, .. } => format!("captured {}", path.display()),
+            Effect::Symlink { path, .. } => format!("symlink  {}", path.display()),
+            Effect::Dir { path, .. } => format!("dir      {}", path.display()),
             Effect::HttpMutation { method, url, .. } => format!("{method:<8} {url}"),
             Effect::Exec { command, .. } => format!("ran      {command}"),
         }

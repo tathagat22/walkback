@@ -6,6 +6,7 @@
 //!   undo status                    what's changed since the last checkpoint
 //!   undo log                       the full history
 //!   undo rollback [checkpoint]     rewind everything since a checkpoint
+//!   undo redo                      undo the last rollback
 
 use std::env;
 use std::io;
@@ -24,6 +25,7 @@ fn main() {
         "status" | "st" => cmd_status(),
         "log" => cmd_log(),
         "rollback" | "undo" => cmd_rollback(rest),
+        "redo" => cmd_redo(),
         "help" | "--help" | "-h" => {
             print_help();
             Ok(())
@@ -58,7 +60,11 @@ fn open() -> io::Result<Undo> {
 fn cmd_init() -> io::Result<()> {
     let cwd = env::current_dir()?;
     Undo::init(&cwd)?;
-    println!("\x1b[32m✓\x1b[0m initialized undo in {}", cwd.join(".undo").display());
+    println!(
+        "\x1b[32m✓\x1b[0m initialized undo in {}",
+        cwd.join(".undo").display()
+    );
+    println!("  \x1b[2madded .undo/ to .gitignore (snapshots may contain secrets)\x1b[0m");
     println!("  next:  undo checkpoint \"before the agent runs\"");
     Ok(())
 }
@@ -87,8 +93,12 @@ fn cmd_track(rest: &[String]) -> io::Result<()> {
     for p in rest {
         // Resolve relative to where the user actually is, not the project root.
         let abs = cwd.join(p);
-        let eff = u.track(&abs)?;
-        println!("\x1b[32m✓\x1b[0m tracking  {}", eff.describe());
+        let effects = u.track(&abs)?;
+        match effects.len() {
+            0 => println!("\x1b[2m·\x1b[0m {p} (already tracked)"),
+            1 => println!("\x1b[32m✓\x1b[0m tracking  {}", effects[0].describe()),
+            n => println!("\x1b[32m✓\x1b[0m tracking  {} ({n} paths)", p),
+        }
     }
     Ok(())
 }
@@ -108,7 +118,11 @@ fn cmd_status() -> io::Result<()> {
     } else {
         println!("  {} change(s) since the checkpoint:", st.effects.len());
         for e in &st.effects {
-            let mark = if e.reversible() { "\x1b[32m⟲\x1b[0m" } else { "\x1b[33m•\x1b[0m" };
+            let mark = if e.reversible() {
+                "\x1b[32m⟲\x1b[0m"
+            } else {
+                "\x1b[33m•\x1b[0m"
+            };
             println!("    {mark} {}", e.describe());
         }
         println!("\n  run `undo rollback` to rewind all of it");
@@ -141,18 +155,53 @@ fn cmd_rollback(rest: &[String]) -> io::Result<()> {
     let u = open()?;
     let target = rest.first().map(String::as_str);
     let report = u.rollback(target)?;
-    println!(
-        "\x1b[32m✓\x1b[0m rewound to \x1b[1m{}\x1b[0m",
-        report.checkpoint
-    );
+    if report.failed.is_empty() {
+        println!(
+            "\x1b[32m✓\x1b[0m rewound to \x1b[1m{}\x1b[0m",
+            report.checkpoint
+        );
+    } else {
+        println!(
+            "\x1b[31m✗\x1b[0m rollback to \x1b[1m{}\x1b[0m incomplete — journal left intact, safe to retry",
+            report.checkpoint
+        );
+    }
     for r in &report.reverted {
         println!("  \x1b[32m⟲\x1b[0m {r}");
     }
     for s in &report.skipped {
         println!("  \x1b[33m•\x1b[0m {s}");
     }
-    if report.reverted.is_empty() && report.skipped.is_empty() {
+    for f in &report.failed {
+        println!("  \x1b[31m✗\x1b[0m {f}");
+    }
+    if report.reverted.is_empty() && report.skipped.is_empty() && report.failed.is_empty() {
         println!("  (nothing to undo)");
+    } else if report.failed.is_empty() {
+        println!("\n  \x1b[2mchanged your mind? `undo redo`\x1b[0m");
+    }
+    if !report.failed.is_empty() {
+        exit(1);
+    }
+    Ok(())
+}
+
+fn cmd_redo() -> io::Result<()> {
+    let u = open()?;
+    let report = u.redo()?;
+    if report.failed.is_empty() {
+        println!("\x1b[32m✓\x1b[0m redid the last rollback");
+    } else {
+        println!("\x1b[31m✗\x1b[0m redo incomplete");
+    }
+    for r in &report.restored {
+        println!("  \x1b[32m⟲\x1b[0m {r}");
+    }
+    for f in &report.failed {
+        println!("  \x1b[31m✗\x1b[0m {f}");
+    }
+    if !report.failed.is_empty() {
+        exit(1);
     }
     Ok(())
 }
@@ -169,6 +218,7 @@ fn print_help() {
          \x20 status                   what's changed since the last checkpoint\n\
          \x20 log                      the full history\n\
          \x20 rollback [checkpoint]    rewind everything since a checkpoint\n\
+         \x20 redo                     undo the last rollback\n\
          \x20 version                  print version"
     );
 }
