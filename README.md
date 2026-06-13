@@ -182,7 +182,9 @@ A universal undo is only worth anything if it's *correct under pressure*. The en
 - **Sandboxed** — refuses to touch anything outside the project root (no `../` traversal), refuses to capture its own `.undo`, and adds `.undo/` to `.gitignore` so snapshots of your secrets never get committed.
 - **Redo** — changed your mind? `undo redo` re-applies what a rollback reversed and re-extends the history so you can roll back again.
 
-This isn't asserted, it's tested: alongside unit tests for each property, a **property test** runs dozens of randomized mutation sequences each run and asserts the tree round-trips byte-for-byte, and a **concurrency test** hammers one journal from many threads and asserts no corruption or duplicate sequence numbers. CI runs the whole suite on Linux and macOS.
+This isn't asserted, it's tested: alongside unit tests for each property, a **property test** runs dozens of randomized mutation sequences each run and asserts the tree round-trips byte-for-byte, and a **concurrency test** hammers one journal from many threads and asserts no corruption or duplicate sequence numbers. The engine test suite runs in CI on **Linux, macOS, and Windows**.
+
+> **Platform note:** the engine is verified on all three OSes. On Windows, content + structure + mtime restore exactly; unix permission bits and symlink fidelity are POSIX-only (they no-op rather than fail). The native NAPI/Node binding currently ships for Linux and macOS — Windows prebuilds are on the roadmap — but the CLI works everywhere.
 
 ## Try the demo
 
