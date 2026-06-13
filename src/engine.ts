@@ -32,6 +32,8 @@ export interface UndoEngine {
   redo(workdir: string): string;
   /** Selective undo: reverse just one file. Returns a description, or null. */
   revert(workdir: string, path: string): string | null;
+  /** JSON `[{ path, status, added, removed, hunk }]` — diff since the checkpoint. */
+  diffJson(workdir: string): string;
 }
 
 const engine = require("@agent-undo/engine") as UndoEngine;

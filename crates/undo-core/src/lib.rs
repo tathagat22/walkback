@@ -12,11 +12,13 @@
 //! carry network, email, and database effects (which know their own inverse)
 //! without changing the rollback path — that uniform reversibility is the point.
 
+mod diff;
 mod effect;
 mod journal;
 mod meta;
 mod store;
 
+pub use diff::DiffEntry;
 pub use effect::{Effect, HttpCompensator};
 pub use journal::{path_is_ignored, RedoReport, RollbackReport, Row, Status, Undo};
 pub use store::Store;
@@ -267,6 +269,37 @@ mod tests {
 
         // Reverting an untracked path is a no-op.
         assert!(u.revert(&dir.join("nope.txt")).unwrap().is_none());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn diff_shows_what_the_agent_changed() {
+        let dir = tmp();
+        let u = Undo::init(&dir).unwrap();
+        fs::write(dir.join("keep.txt"), b"line1\nline2\n").unwrap();
+        u.checkpoint("c").unwrap();
+
+        u.track(&dir.join("keep.txt")).unwrap();
+        u.track(&dir.join("new.txt")).unwrap();
+        fs::write(dir.join("keep.txt"), b"line1\nCHANGED\n").unwrap();
+        fs::write(dir.join("new.txt"), b"brand new\n").unwrap();
+
+        let entries = u.diff().unwrap();
+        let modified = entries
+            .iter()
+            .find(|e| e.path.ends_with("keep.txt"))
+            .unwrap();
+        assert_eq!(modified.status, "modified");
+        assert_eq!(modified.added, 1);
+        assert_eq!(modified.removed, 1);
+        assert!(modified.hunk.contains("+line1\nCHANGED") || modified.hunk.contains("CHANGED"));
+
+        let created = entries
+            .iter()
+            .find(|e| e.path.ends_with("new.txt"))
+            .unwrap();
+        assert_eq!(created.status, "created");
+        assert_eq!(created.added, 1);
         fs::remove_dir_all(&dir).ok();
     }
 

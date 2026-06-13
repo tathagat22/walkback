@@ -31,3 +31,8 @@ export declare function redo(workdir: string): string
  * path wasn't tracked.
  */
 export declare function revert(workdir: string, path: string): string | null
+/**
+ * JSON array of `{ path, status, added, removed, hunk }` — a PR-style diff of
+ * everything changed since the last checkpoint.
+ */
+export declare function diffJson(workdir: string): string

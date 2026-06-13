@@ -30,6 +30,7 @@ fn main() {
         "checkpoint" | "cp" => cmd_checkpoint(rest),
         "track" => cmd_track(rest),
         "status" | "st" => cmd_status(),
+        "diff" => cmd_diff(),
         "log" => cmd_log(),
         "rollback" | "undo" => cmd_rollback(rest),
         "revert" => cmd_revert(rest),
@@ -140,6 +141,49 @@ fn cmd_status() -> io::Result<()> {
         }
         println!("\n  run `undo rollback` to rewind all of it");
     }
+    Ok(())
+}
+
+fn cmd_diff() -> io::Result<()> {
+    let u = open()?;
+    let entries = u.diff()?;
+    if entries.is_empty() {
+        println!("(no changes since the checkpoint)");
+        return Ok(());
+    }
+    let mut total_added = 0;
+    let mut total_removed = 0;
+    for e in &entries {
+        total_added += e.added;
+        total_removed += e.removed;
+        let badge = match e.status.as_str() {
+            "created" => "\x1b[32mnew\x1b[0m",
+            "deleted" => "\x1b[31mdeleted\x1b[0m",
+            "binary" => "\x1b[33mbinary\x1b[0m",
+            "symlink" => "\x1b[36msymlink\x1b[0m",
+            _ => "\x1b[33mmodified\x1b[0m",
+        };
+        println!(
+            "\n\x1b[1m{}\x1b[0m  {badge}  \x1b[32m+{}\x1b[0m \x1b[31m-{}\x1b[0m",
+            e.path, e.added, e.removed
+        );
+        for line in e.hunk.lines() {
+            let colored = if line.starts_with('+') {
+                format!("\x1b[32m{line}\x1b[0m")
+            } else if line.starts_with('-') {
+                format!("\x1b[31m{line}\x1b[0m")
+            } else if line.starts_with("@@") {
+                format!("\x1b[36m{line}\x1b[0m")
+            } else {
+                line.to_string()
+            };
+            println!("  {colored}");
+        }
+    }
+    println!(
+        "\n\x1b[1m{}\x1b[0m file(s) changed, \x1b[32m+{total_added}\x1b[0m \x1b[31m-{total_removed}\x1b[0m",
+        entries.len()
+    );
     Ok(())
 }
 
@@ -555,6 +599,7 @@ fn print_help() {
          \x20 checkpoint [label]       mark a point you can rewind to\n\
          \x20 track <path>...          capture a file before the agent changes it\n\
          \x20 status                   what's changed since the last checkpoint\n\
+         \x20 diff                     a PR-style diff of everything the agent changed\n\
          \x20 log                      the full history\n\
          \x20 rollback [checkpoint]    rewind everything since a checkpoint\n\
          \x20 revert <path>            selectively undo just one file\n\

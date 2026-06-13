@@ -221,6 +221,38 @@ server.registerTool(
 );
 
 server.registerTool(
+  "undo_diff",
+  {
+    title: "Review what the agent changed",
+    description:
+      "A PR-style diff of every file changed since the last checkpoint — the reviewable " +
+      "'here's exactly what I did' surface. Built from undo's own before-snapshots.",
+    inputSchema: cwdSchema,
+  },
+  guard(({ cwd }) => {
+    const entries = JSON.parse(engine.diffJson(wd(cwd))) as Array<{
+      path: string;
+      status: string;
+      added: number;
+      removed: number;
+      hunk: string;
+    }>;
+    if (entries.length === 0) return "No changes since the checkpoint.";
+    let added = 0;
+    let removed = 0;
+    const blocks = entries.map((e) => {
+      added += e.added;
+      removed += e.removed;
+      return `${e.path}  [${e.status}]  +${e.added} -${e.removed}\n${e.hunk}`.trimEnd();
+    });
+    return (
+      blocks.join("\n\n") +
+      `\n\n${entries.length} file(s) changed, +${added} -${removed}`
+    );
+  }),
+);
+
+server.registerTool(
   "undo_revert",
   {
     title: "Selectively undo one file",

@@ -405,6 +405,13 @@ impl Undo {
         self.rows()
     }
 
+    /// A PR-style diff of everything changed since the last checkpoint, built
+    /// from undo's captured before-state vs. the current files.
+    pub fn diff(&self) -> io::Result<Vec<crate::DiffEntry>> {
+        let status = self.status()?;
+        Ok(crate::diff::diff_effects(&status.effects, &self.store))
+    }
+
     pub fn can_redo(&self) -> bool {
         self.redo_path().exists()
     }

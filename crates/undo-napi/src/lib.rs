@@ -112,3 +112,11 @@ pub fn revert(workdir: String, path: String) -> napi::Result<Option<String>> {
         .revert(std::path::Path::new(&path))
         .map_err(err)
 }
+
+/// JSON array of `{ path, status, added, removed, hunk }` — a PR-style diff of
+/// everything changed since the last checkpoint.
+#[napi]
+pub fn diff_json(workdir: String) -> napi::Result<String> {
+    let entries = open(&workdir)?.diff().map_err(err)?;
+    serde_json::to_string(&entries).map_err(err)
+}

@@ -310,7 +310,7 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`)
 }
 
-const { init, checkpoint, track, recordHttp, statusJson, logJson, rollback, redo, revert } = nativeBinding
+const { init, checkpoint, track, recordHttp, statusJson, logJson, rollback, redo, revert, diffJson } = nativeBinding
 
 module.exports.init = init
 module.exports.checkpoint = checkpoint
@@ -321,3 +321,4 @@ module.exports.logJson = logJson
 module.exports.rollback = rollback
 module.exports.redo = redo
 module.exports.revert = revert
+module.exports.diffJson = diffJson

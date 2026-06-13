@@ -28,3 +28,4 @@ filetime.workspace = true
 fs2.workspace = true
 notify.workspace = true
 ctrlc.workspace = true
+similar.workspace = true

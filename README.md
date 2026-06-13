@@ -252,6 +252,29 @@ undo_compensate execute=true     # run them, most-recent-first
 
 This works with **any** cloud, database, or CLI — not a hardcoded few. Honest caveat for databases: undo runs the inverse you record, so for `UPDATE`/`DELETE` you must capture the prior values to build that inverse. undo executes; it doesn't guess.
 
+## See exactly what the agent changed: `undo diff`
+
+Before you trust — or reverse — anything, *look*. `undo diff` is a PR-style review of everything the agent touched since the checkpoint, built from undo's own before-snapshots (no git required):
+
+```bash
+undo diff
+```
+```diff
+ src/auth.ts  modified  +2 -2
+   @@ -1,2 +1,2 @@
+  -const KEY = "prod-secret"
+  -function login() {}
+  +const KEY = ""
+  +function login() { broken() }
+
+ src/new.ts   new  +1 -0
+  +export const added = true
+
+ 2 file(s) changed, +3 -2
+```
+
+This is the surface that makes undo legible to *everyone*, not just people who think in rollbacks — review first, then keep it, `undo revert` one file, or `undo rollback` the lot. Also available as the `undo_diff` MCP tool.
+
 ## Selective undo
 
 Rollback is all-or-nothing; sometimes you want to keep most of what the agent did and reverse *one* thing:
@@ -264,10 +287,11 @@ undo revert src/config.ts        # restore just this file; leave everything else
 
 **Today:** files / directories / symlinks / permissions (byte-perfect, crash-safe, with redo and **selective** per-file revert); **network calls** (compensators); **email** (hold-and-release true unsend); **cloud + databases + any CLI** (recorded reversal commands). All external reversals are dry-run gated.
 
+Plus **`undo diff`** to review it all first, **selective per-file revert**, and **redo**.
+
 **Roadmap:**
 
 - **Provider-pack sugar** — one-liner helpers that build the Stripe/GitHub/Gmail compensators for you
-- **`undo diff`** — "show me everything the AI changed," reviewable like a PR
 - **Team control plane** — shared journals + org policy for agent fleets
 
 The novel core is the `Effect` abstraction: anything that can describe its own inverse plugs into the *same* journal and the *same* one-button rollback. Filesystem-only undo exists; **heterogeneous, cross-system undo does not.** That uniform reversibility layer is the point.
