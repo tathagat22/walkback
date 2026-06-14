@@ -1,6 +1,6 @@
 {
   "name": "@walkback/core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Undo anything your AI agent does. A universal time machine that records every side effect an autonomous agent produces — file writes, shell commands, git state, HTTP mutations — and reverses them with one command.",
   "type": "module",
   "license": "MIT",
@@ -46,7 +46,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@walkback/engine": "0.2.0",
+    "@walkback/engine": "0.2.1",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "zod": "^3.23.8"
   },

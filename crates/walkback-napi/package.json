@@ -1,6 +1,6 @@
 {
   "name": "@walkback/engine",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "NAPI-built native binding to the Rust undo engine.",
   "main": "index.js",
   "types": "index.d.ts",

@@ -44,7 +44,7 @@ Recording the inverse at the moment you act is the difference between "reversibl
 "lost". Treat it as part of doing the action, not an afterthought.`;
 
 const server = new McpServer(
-  { name: "undo", version: "0.2.0" },
+  { name: "walkback", version: "0.2.1" },
   { instructions: INSTRUCTIONS },
 );
 
