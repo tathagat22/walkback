@@ -137,6 +137,8 @@ Add to your MCP client's config (e.g. `.mcp.json`):
 
 **16 tools:** `undo_init` · `undo_checkpoint` · `undo_track` · `undo_status` · `undo_diff` · `undo_log` · `undo_rollback` · `undo_revert` · `undo_redo` · `undo_record_http` · `undo_record_reversal` · `undo_compensate` · `undo_email_stage` · `undo_email_release` · `undo_email_cancel` · `undo_email_pending`
 
+The server ships **instructions** (auto-injected into the agent's context) telling the agent to checkpoint first and **record the inverse** of any network / cloud / DB / email action — because undo can reverse files automatically, but it can't *guess* the inverse of a network call. Not using MCP? Paste the same policy into your agent's system prompt: see [docs/agent-instructions.md](docs/agent-instructions.md).
+
 ## Architecture
 
 A polyglot system with a real native boundary:

@@ -17,7 +17,36 @@ import { compensate, renderCompensateResult } from "./compensate.js";
 import { stageEmail, releaseEmail, cancelEmail, listPending } from "./email.js";
 import { recordReversal } from "./reversals.js";
 
-const server = new McpServer({ name: "undo", version: "0.2.0" });
+// Injected into the agent's context by MCP clients. This is what makes the
+// reversibility actually reliable in the wild: undo provides the mechanism, but
+// the agent has to record the inverse of anything that isn't a plain file edit.
+const INSTRUCTIONS = `This server makes your actions reversible. Follow this policy:
+
+1. CHECKPOINT FIRST. Before you start a task, call undo_checkpoint once. Before
+   editing/creating/deleting a file, call undo_track on it (directories work too).
+   File changes are then fully reversible with undo_rollback (or undo_revert for one file).
+
+2. RECORD THE INVERSE OF EVERYTHING ELSE — undo cannot guess it:
+   • Network mutation (POST/PUT/PATCH/DELETE): immediately call undo_record_http with
+     the COMPENSATING request (e.g. the DELETE that removes what you just POSTed, the
+     refund for a charge). Without this, the call cannot be reversed.
+   • Cloud or database change: call undo_record_reversal with the exact command that
+     reverses it (e.g. "aws s3 rb s3://bucket", an inverse SQL statement). For UPDATE/
+     DELETE, capture the prior values first so you can build the inverse.
+   • Email: do NOT send directly. Call undo_email_stage to hold it as a draft, then
+     undo_email_release to send or undo_email_cancel to truly unsend it.
+
+3. REVIEW + REVERSE. undo_diff shows everything you changed. undo_rollback reverses files;
+   undo_compensate (dry-run first, then execute=true) runs the recorded network/cloud/DB
+   reversals; undo_redo re-applies a rollback.
+
+Recording the inverse at the moment you act is the difference between "reversible" and
+"lost". Treat it as part of doing the action, not an afterthought.`;
+
+const server = new McpServer(
+  { name: "undo", version: "0.2.0" },
+  { instructions: INSTRUCTIONS },
+);
 
 const cwdSchema = {
   cwd: z

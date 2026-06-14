@@ -355,9 +355,12 @@ fn cmd_watch(rest: &[String]) -> io::Result<()> {
     notify::Watcher::watch(&mut watcher, &root, notify::RecursiveMode::Recursive)
         .map_err(notify_err)?;
 
-    // Debounce: collect changed paths, print them after a quiet moment. We only
-    // *report* changes — the baseline snapshot already makes them reversible, so
-    // re-tracking here would wrongly protect agent-created files from pruning.
+    // Debounce: collect changed paths, report them after a quiet moment. The
+    // baseline snapshot already makes them reversible, so during normal watching
+    // `track(&root)` is a cheap no-op (root is already captured under this
+    // checkpoint). Its purpose is to *self-heal*: if you roll back mid-session,
+    // the snapshot is cleared, and the next batch re-captures the root so the
+    // resumed agent's changes stay reversible — exactly what the hook does.
     let mut pending: BTreeSet<PathBuf> = BTreeSet::new();
     let mut total = 0usize;
     while running.load(Ordering::SeqCst) {
@@ -371,11 +374,15 @@ fn cmd_watch(rest: &[String]) -> io::Result<()> {
             }
             Ok(Err(_)) => {}
             Err(RecvTimeoutError::Timeout) => {
+                if pending.is_empty() {
+                    continue;
+                }
                 for p in std::mem::take(&mut pending) {
                     let rel = p.strip_prefix(&root).unwrap_or(&p);
                     println!("  \x1b[2m~\x1b[0m {}", rel.display());
                     total += 1;
                 }
+                let _ = u.track(&root); // self-heal after a mid-session rollback
             }
             Err(RecvTimeoutError::Disconnected) => break,
         }
