@@ -98,7 +98,7 @@ undo_email_cancel                            # delete the draft → it never exi
 undo_email_release                           # ...or actually deliver it
 ```
 
-**Before release:** cancel is a true unsend. **After delivery:** it's gone, and undo says so plainly — the most it can do then is trash *your* copy. We don't pretend to reach into other people's inboxes.
+**Before release:** cancel is a true unsend. **After delivery:** it's gone, and undo says so plainly — the most it can do then is trash *your* copy. We don't pretend to reach into other people's inboxes. Works with **Gmail** (`GMAIL_ACCESS_TOKEN`) and **Outlook / Microsoft 365** (`OUTLOOK_ACCESS_TOKEN`); undo holds no credentials of its own.
 
 ### ☁️ Cloud & databases — any tool
 undo doesn't hardcode AWS or Postgres. The agent records the **command that reverses** what it did, and undo runs it (dry-run gated):

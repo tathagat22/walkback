@@ -10,7 +10,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { GmailClient, type EmailDraft } from "./providers/gmail.js";
+import type { EmailDraft, EmailProvider } from "./providers/email-provider.js";
+import { GmailClient } from "./providers/gmail.js";
+import { OutlookClient } from "./providers/outlook.js";
 
 export interface PendingEmail {
   draftId: string;
@@ -37,18 +39,30 @@ function savePending(cwd: string, list: PendingEmail[]): void {
   writeFileSync(storePath(cwd), JSON.stringify(list, null, 2) + "\n");
 }
 
-function gmail(): GmailClient {
-  const token = process.env.GMAIL_ACCESS_TOKEN;
-  if (!token) {
-    throw new Error("email undo needs a Gmail token — set GMAIL_ACCESS_TOKEN");
+// Pick the email backend. Explicit EMAIL_PROVIDER wins; otherwise infer from
+// whichever token is set. Defaults to Gmail. Base URLs are overridable for tests.
+function provider(): EmailProvider {
+  const which = (
+    process.env.EMAIL_PROVIDER ??
+    (process.env.OUTLOOK_ACCESS_TOKEN ? "outlook" : "gmail")
+  ).toLowerCase();
+
+  if (which === "outlook") {
+    const token = process.env.OUTLOOK_ACCESS_TOKEN ?? process.env.EMAIL_ACCESS_TOKEN;
+    if (!token) throw new Error("email undo needs an Outlook token — set OUTLOOK_ACCESS_TOKEN");
+    const base = process.env.OUTLOOK_API_BASE ?? "https://graph.microsoft.com/v1.0";
+    return new OutlookClient(base, token);
   }
+
+  const token = process.env.GMAIL_ACCESS_TOKEN ?? process.env.EMAIL_ACCESS_TOKEN;
+  if (!token) throw new Error("email undo needs a Gmail token — set GMAIL_ACCESS_TOKEN");
   const base = process.env.GMAIL_API_BASE ?? "https://gmail.googleapis.com/gmail/v1";
   return new GmailClient(base, token);
 }
 
 /** Hold an email as a draft. It is NOT sent until released. */
 export async function stageEmail(cwd: string, draft: EmailDraft): Promise<PendingEmail> {
-  const { id } = await gmail().createDraft(draft);
+  const { id } = await provider().createDraft(draft);
   const entry: PendingEmail = {
     draftId: id,
     to: draft.to,
@@ -74,7 +88,7 @@ export async function releaseEmail(
   draftId?: string,
 ): Promise<PendingEmail[]> {
   const targets = select(cwd, draftId);
-  const client = gmail();
+  const client = provider();
   for (const e of targets) await client.sendDraft(e.draftId);
   const sentIds = new Set(targets.map((e) => e.draftId));
   savePending(cwd, loadPending(cwd).filter((e) => !sentIds.has(e.draftId)));
@@ -87,7 +101,7 @@ export async function cancelEmail(
   draftId?: string,
 ): Promise<PendingEmail[]> {
   const targets = select(cwd, draftId);
-  const client = gmail();
+  const client = provider();
   for (const e of targets) await client.deleteDraft(e.draftId);
   const cancelledIds = new Set(targets.map((e) => e.draftId));
   savePending(cwd, loadPending(cwd).filter((e) => !cancelledIds.has(e.draftId)));
