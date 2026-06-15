@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// The `undo` MCP server — Undo anything your AI agent does.
+// The `walkback` MCP server — Undo anything your AI agent does.
 //
 // An agent checkpoints itself before acting, tracks each path it's about to
 // change (files or whole directories), and records network mutations. If
-// anything goes wrong, the human (or the agent) calls undo_rollback and the
-// world snaps back — and undo_redo puts it back if they change their mind.
+// anything goes wrong, the human (or the agent) calls walkback_rollback and the
+// world snaps back — and walkback_redo puts it back if they change their mind.
 //
 // Every handler is wrapped so an engine error becomes a structured MCP error
 // instead of crashing the server.
@@ -18,27 +18,27 @@ import { stageEmail, releaseEmail, cancelEmail, listPending } from "./email.js";
 import { recordReversal } from "./reversals.js";
 
 // Injected into the agent's context by MCP clients. This is what makes the
-// reversibility actually reliable in the wild: undo provides the mechanism, but
+// reversibility actually reliable in the wild: walkback provides the mechanism, but
 // the agent has to record the inverse of anything that isn't a plain file edit.
 const INSTRUCTIONS = `This server makes your actions reversible. Follow this policy:
 
-1. CHECKPOINT FIRST. Before you start a task, call undo_checkpoint once. Before
-   editing/creating/deleting a file, call undo_track on it (directories work too).
-   File changes are then fully reversible with undo_rollback (or undo_revert for one file).
+1. CHECKPOINT FIRST. Before you start a task, call walkback_checkpoint once. Before
+   editing/creating/deleting a file, call walkback_track on it (directories work too).
+   File changes are then fully reversible with walkback_rollback (or walkback_revert for one file).
 
-2. RECORD THE INVERSE OF EVERYTHING ELSE — undo cannot guess it:
-   • Network mutation (POST/PUT/PATCH/DELETE): immediately call undo_record_http with
+2. RECORD THE INVERSE OF EVERYTHING ELSE — walkback cannot guess it:
+   • Network mutation (POST/PUT/PATCH/DELETE): immediately call walkback_record_http with
      the COMPENSATING request (e.g. the DELETE that removes what you just POSTed, the
      refund for a charge). Without this, the call cannot be reversed.
-   • Cloud or database change: call undo_record_reversal with the exact command that
+   • Cloud or database change: call walkback_record_reversal with the exact command that
      reverses it (e.g. "aws s3 rb s3://bucket", an inverse SQL statement). For UPDATE/
      DELETE, capture the prior values first so you can build the inverse.
-   • Email: do NOT send directly. Call undo_email_stage to hold it as a draft, then
-     undo_email_release to send or undo_email_cancel to truly unsend it.
+   • Email: do NOT send directly. Call walkback_email_stage to hold it as a draft, then
+     walkback_email_release to send or walkback_email_cancel to truly unsend it.
 
-3. REVIEW + REVERSE. undo_diff shows everything you changed. undo_rollback reverses files;
-   undo_compensate (dry-run first, then execute=true) runs the recorded network/cloud/DB
-   reversals; undo_redo re-applies a rollback.
+3. REVIEW + REVERSE. walkback_diff shows everything you changed. walkback_rollback reverses files;
+   walkback_compensate (dry-run first, then execute=true) runs the recorded network/cloud/DB
+   reversals; walkback_redo re-applies a rollback.
 
 Recording the inverse at the moment you act is the difference between "reversible" and
 "lost". Treat it as part of doing the action, not an afterthought.`;
@@ -60,7 +60,7 @@ const fail = (e: unknown) => ({
   content: [
     {
       type: "text" as const,
-      text: `undo error: ${e instanceof Error ? e.message : String(e)}`,
+      text: `walkback error: ${e instanceof Error ? e.message : String(e)}`,
     },
   ],
   isError: true,
@@ -79,21 +79,21 @@ const guard =
   };
 
 server.registerTool(
-  "undo_init",
+  "walkback_init",
   {
-    title: "Initialize undo",
+    title: "Initialize walkback",
     description:
-      "Set up the undo time machine in a project directory (and gitignore its snapshots). Run once before checkpointing.",
+      "Set up the walkback time machine in a project directory (and gitignore its snapshots). Run once before checkpointing.",
     inputSchema: cwdSchema,
   },
   guard(({ cwd }) => {
     engine.init(wd(cwd));
-    return `Initialized undo in ${wd(cwd)}/.undo (added .undo/ to .gitignore)`;
+    return `Initialized walkback in ${wd(cwd)}/.undo (added .undo/ to .gitignore)`;
   }),
 );
 
 server.registerTool(
-  "undo_checkpoint",
+  "walkback_checkpoint",
   {
     title: "Create a checkpoint",
     description:
@@ -110,7 +110,7 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_track",
+  "walkback_track",
   {
     title: "Track a path before changing it",
     description:
@@ -131,7 +131,7 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_record_http",
+  "walkback_record_http",
   {
     title: "Record a network mutation",
     description:
@@ -160,7 +160,7 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_status",
+  "walkback_status",
   {
     title: "What's changed since the checkpoint",
     description: "Show every effect recorded since the most recent checkpoint.",
@@ -168,7 +168,7 @@ server.registerTool(
   },
   guard(({ cwd }) => {
     const status = JSON.parse(engine.statusJson(wd(cwd)));
-    if (!status.checkpoint) return "No checkpoint yet. Call undo_checkpoint first.";
+    if (!status.checkpoint) return "No checkpoint yet. Call walkback_checkpoint first.";
     const [id, label] = status.checkpoint;
     const effects: string[] = (status.effects ?? []).map(describeEffect);
     if (effects.length === 0) return `On checkpoint ${id} ("${label}"). Nothing recorded yet.`;
@@ -180,9 +180,9 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_log",
+  "walkback_log",
   {
-    title: "Full undo history",
+    title: "Full walkback history",
     description: "List every checkpoint and effect in order.",
     inputSchema: cwdSchema,
   },
@@ -198,14 +198,14 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_rollback",
+  "walkback_rollback",
   {
     title: "Rewind everything",
     description:
       "Reverse every change made since a checkpoint (the latest one by default). " +
       "Files, directories, and symlinks are restored exactly; network/shell effects are listed " +
       "for manual handling. If any step fails, the journal is left intact so you can safely retry. " +
-      "Use undo_redo to reverse a rollback.",
+      "Use walkback_redo to reverse a rollback.",
     inputSchema: {
       ...cwdSchema,
       checkpoint: z
@@ -232,11 +232,11 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_redo",
+  "walkback_redo",
   {
     title: "Undo the last rollback",
     description:
-      "Re-apply the changes that the most recent undo_rollback reversed, and re-extend the " +
+      "Re-apply the changes that the most recent walkback_rollback reversed, and re-extend the " +
       "history so you can roll back again.",
     inputSchema: cwdSchema,
   },
@@ -250,12 +250,12 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_diff",
+  "walkback_diff",
   {
     title: "Review what the agent changed",
     description:
       "A PR-style diff of every file changed since the last checkpoint — the reviewable " +
-      "'here's exactly what I did' surface. Built from undo's own before-snapshots.",
+      "'here's exactly what I did' surface. Built from walkback's own before-snapshots.",
     inputSchema: cwdSchema,
   },
   guard(({ cwd }) => {
@@ -282,7 +282,7 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_revert",
+  "walkback_revert",
   {
     title: "Selectively undo one file",
     description:
@@ -300,14 +300,14 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_record_reversal",
+  "walkback_record_reversal",
   {
     title: "Record how to reverse a cloud/DB action",
     description:
       "Record the command that reverses something the agent did to an external system — a cloud " +
       "resource (e.g. 'terraform destroy', 'aws s3 rb s3://bucket') or a database change (e.g. an " +
-      "inverse SQL via psql). undo_compensate will run it (dry-run gated). Works with any tool. " +
-      "For UPDATE/DELETE you must capture the prior values to build the inverse — undo runs what you give it.",
+      "inverse SQL via psql). walkback_compensate will run it (dry-run gated). Works with any tool. " +
+      "For UPDATE/DELETE you must capture the prior values to build the inverse — walkback runs what you give it.",
     inputSchema: {
       ...cwdSchema,
       description: z.string().describe("What was done, e.g. 'created S3 bucket assets-prod'."),
@@ -317,12 +317,12 @@ server.registerTool(
   },
   guard(({ cwd, description, command, runIn }) => {
     recordReversal(wd(cwd), { description, command, cwd: runIn });
-    return `Recorded reversal for "${description}":\n  $ ${command}\n  run it with undo_compensate (execute=true)`;
+    return `Recorded reversal for "${description}":\n  $ ${command}\n  run it with walkback_compensate (execute=true)`;
   }),
 );
 
 server.registerTool(
-  "undo_compensate",
+  "walkback_compensate",
   {
     title: "Reverse network + cloud/DB actions",
     description:
@@ -348,12 +348,12 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_email_stage",
+  "walkback_email_stage",
   {
     title: "Send an email — reversibly (hold as draft)",
     description:
       "Hold an email instead of sending it immediately: it becomes a Gmail DRAFT that has gone " +
-      "nowhere. Release it with undo_email_release to actually deliver, or undo_email_cancel to " +
+      "nowhere. Release it with walkback_email_release to actually deliver, or walkback_email_cancel to " +
       "truly unsend it (it never reaches the recipient). Needs GMAIL_ACCESS_TOKEN.",
     inputSchema: {
       ...cwdSchema,
@@ -367,7 +367,7 @@ server.registerTool(
       const e = await stageEmail(wd(cwd), { to, subject, body });
       return ok(
         `Held (not sent): "${e.subject}" → ${e.to}  [draft ${e.draftId}]\n` +
-          `  release:  undo_email_release\n  unsend:   undo_email_cancel`,
+          `  release:  walkback_email_release\n  unsend:   walkback_email_cancel`,
       );
     } catch (e) {
       return fail(e);
@@ -376,7 +376,7 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_email_release",
+  "walkback_email_release",
   {
     title: "Deliver held email(s)",
     description:
@@ -398,7 +398,7 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_email_cancel",
+  "walkback_email_cancel",
   {
     title: "Unsend held email(s)",
     description:
@@ -423,7 +423,7 @@ server.registerTool(
 );
 
 server.registerTool(
-  "undo_email_pending",
+  "walkback_email_pending",
   {
     title: "List held emails",
     description: "Show emails staged but not yet released — these can still be cancelled.",
@@ -457,4 +457,4 @@ function describeEffect(e: any): string {
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
-console.error("undo MCP server running on stdio");
+console.error("walkback MCP server running on stdio");

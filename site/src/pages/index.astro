@@ -22,7 +22,7 @@ const reverses = [
     title: "Network & API calls",
     tag: "actually reversed",
     body: "When a mutation is recorded with its compensator — the request that reverses it — walkback runs it. Dry-run gated: it shows you what it would do before it fires.",
-    code: "POST /v1/charges    → records refund\nwalkback compensate → previews, then fires",
+    code: "POST /v1/charges    → records refund\nwalkback_compensate → previews, then fires",
   },
   {
     icon: "✉️",
@@ -38,7 +38,7 @@ const reverses = [
     title: "Cloud & databases",
     tag: "any tool",
     body: "No hardcoded AWS or Postgres. The agent records the command that reverses what it did, and walkback runs it — dry-run gated. Works with any cloud, DB, or CLI.",
-    code: 'record_reversal "created bucket" \\\n  command="aws s3 rb s3://assets-prod"',
+    code: 'walkback_record_reversal "created bucket" \\\n  command="aws s3 rb s3://assets-prod"',
   },
 ];
 
